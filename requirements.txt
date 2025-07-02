@@ -2,6 +2,7 @@ streamlit
 openai
 python-pptx
 pydantic
+pymupdf
 pdf2image
 Pillow
 google-auth
