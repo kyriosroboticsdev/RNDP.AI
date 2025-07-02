@@ -1,0 +1,12 @@
+# Optional:
+__pycache__/
+*.pyc
+
+# Don't upload database
+slides.db
+
+# Don't upload secrets (already using secrets.toml)
+.env
+
+# Don't upload user-generated slides
+slides/
