@@ -138,20 +138,27 @@ def _prepare_image(image_file: Optional[BytesIO], fallback_filename: Optional[st
     return None
 
 def _insert_image(slide, image_stream: BytesIO):
-    """Insert an image onto the slide in place of known placeholders."""
-    image_stream.seek(0)
+    image_stream.seek(0)  # Reset stream position
     img = Image.open(image_stream)
     img_width, img_height = img.size
 
     for shape in slide.shapes:
-        if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE and shape.has_text_frame:
-            full_text = " ".join(run.text.lower().strip() for para in shape.text_frame.paragraphs for run in para.runs)
-            if "image placeholder" in full_text or "insert image here" in full_text or "image goes here" in full_text:
+        if shape.has_text_frame:
+            placeholder_text = " ".join(
+                run.text.lower().strip()
+                for para in shape.text_frame.paragraphs
+                for run in para.runs
+            )
+            if any(keyword in placeholder_text for keyword in ["insert image here", "image placeholder", "image goes here"]):
+                # Save placeholder position and size
                 left, top, width, height = shape.left, shape.top, shape.width, shape.height
-                slide.shapes._spTree.remove(shape._element)
+                slide.shapes._spTree.remove(shape._element)  # Remove the placeholder textbox
+
+                # Resize image to fit inside the placeholder box
                 scale = min(width / img_width, height / img_height)
                 new_width = int(img_width * scale)
                 new_height = int(img_height * scale)
+
                 image_stream.seek(0)
                 slide.shapes.add_picture(
                     image_stream,
