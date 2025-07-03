@@ -64,6 +64,8 @@ if menu == "Generate Slide":
             )
 
             title = input_text.split("\n")[0][:40]
+            os.makedirs("slides", exist_ok=True)
+            
             filename = f"slides/{username}_page{uuid.uuid4().hex[:4]}.pptx"
             with open(filename, "wb") as f:
                 f.write(result.pptx_bytes)
