@@ -2,124 +2,141 @@
 
 import streamlit as st
 import os
+import time
 import uuid
 import tempfile
 from pydantic import BaseModel
-from pdf2image import convert_from_bytes
-
-from google_auth import login_user, logout_user
-from helpers import structured_generator, get_ai_recommended_image
+from helpers import (
+    structured_generator,
+    get_ai_recommended_image,
+    extract_text_from_slide_file
+)
 from db import initialize_db, save_slide, get_user_slides, add_user
+from google_auth import login_user, logout_user
+from pptx import Presentation
 
-# Set Streamlit page layout
+# App setup
 st.set_page_config(page_title="Robotics Slide Generator", layout="centered")
 
-# Initialize local database
+# Database setup
 initialize_db()
 
-# Authenticate with Google and register user
-user = login_user()
-username = user["email"].split("@")[0].lower()
-add_user(username, user["name"], user["email"])
+# Session timeout config
+SESSION_TIMEOUT = 30 * 60
+if "login_time" in st.session_state:
+    if time.time() - st.session_state["login_time"] > SESSION_TIMEOUT:
+        st.session_state.clear()
+        st.warning("⏰ Session expired. Please log in again.")
+        st.stop()
 
-# Sidebar logout
-st.sidebar.markdown(f"👤 Logged in as `{user['email']}`")
+# Authenticate user
+user_info = login_user()
+if not user_info:
+    st.stop()
+
+# Register user if not in DB
+username = user_info["email"].split("@")[0].lower()
+add_user(username, user_info["name"], user_info["email"])
+
+# Sidebar user info + logout
+st.sidebar.markdown(f"👋 Logged in as: `{user_info['email']}`")
 logout_user()
 
-# AI output model
+# Main navigation
+st.title("🤖 Robotics Slide Generator")
+menu = st.selectbox("Choose a page:", ["Generate Slide", "My Slides"])
+
+# Define output data model
 class SlideOutput(BaseModel):
     pptx_bytes: bytes
 
-# App title + menu
-st.title("🤖 AI-Powered Robotics Slide Generator")
-menu = st.selectbox("📚 Choose a Page:", ["Generate Slide", "My Slides"])
-
+# ===============================
+# 🔧 PAGE 1: GENERATE SLIDE
+# ===============================
 if menu == "Generate Slide":
-    st.subheader("📝 Generate a New Slide")
+    st.header("📄 Generate a New Slide")
 
-    input_text = st.text_area("Slide content:", placeholder="Our robot passed the claw test.")
-    template_file = st.file_uploader("Upload a .pptx template", type=["pptx"])
-    image_file = st.file_uploader("Optional image", type=["png", "jpg", "jpeg"])
+    input_text = st.text_area("📝 Slide Topic", help="Write a brief prompt or description")
+    template_file = st.file_uploader("📂 Upload Template (.pptx)", type=["pptx"])
+    image_file = st.file_uploader("🖼️ Optional image for slide", type=["png", "jpg", "jpeg"])
 
+    # Font and image customization
     fallback_images = os.listdir("images") if os.path.exists("images") else []
-    fallback_image_choice = st.selectbox("Fallback image (if no upload):", fallback_images)
+    fallback_image_choice = None
+    if not image_file and fallback_images:
+        ai_choice = get_ai_recommended_image(input_text, fallback_images)
+        fallback_image_choice = st.selectbox("📎 Choose fallback image", fallback_images, index=fallback_images.index(ai_choice))
 
-    font_name = st.selectbox("Font:", ["Calibri", "Arial", "Times New Roman", "Verdana"])
-    font_color = st.color_picker("Font color", "#000000")[1:]
+    font_name = st.selectbox("🖋 Font Style", ["Calibri", "Arial", "Times New Roman", "Verdana"])
+    font_color = st.color_picker("🎨 Font Color", "#000000")[1:]
 
     if st.button("🚀 Generate Slide"):
         if not input_text or not template_file:
-            st.warning("Please upload a template and write slide content.")
-        else:
-            result = structured_generator(
-                model_name="gpt-4",
-                prompt="Generate robotics content",
-                output_model=SlideOutput,
-                template_file=template_file,
-                content_text=input_text,
-                image_file=image_file,
-                font_name=font_name,
-                font_color=font_color,
-                fallback_image_filename=fallback_image_choice
-            )
+            st.warning("Please provide both a prompt and a template.")
+            st.stop()
 
-            title = input_text.split("\n")[0][:40]
-            os.makedirs("slides", exist_ok=True)
-            
-            filename = f"slides/{username}_page{uuid.uuid4().hex[:4]}.pptx"
-            with open(filename, "wb") as f:
-                f.write(result.pptx_bytes)
+        result = structured_generator(
+            model_name="gpt-4",
+            prompt="Generate robotics notebook content.",
+            output_model=SlideOutput,
+            template_file=template_file,
+            content_text=input_text,
+            image_file=image_file,
+            font_name=font_name,
+            font_color=font_color,
+            fallback_image_filename=fallback_image_choice
+        )
 
-            save_slide(username, title, filename)
-            st.success("✅ Slide generated and saved!")
+        os.makedirs("slides", exist_ok=True)
+        slide_filename = f"slides/{username}_page{uuid.uuid4().hex[:4]}.pptx"
+        with open(slide_filename, "wb") as f:
+            f.write(result.pptx_bytes)
 
-            # Preview each slide
-            try:
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pptx") as temp_pptx:
-                    temp_pptx.write(result.pptx_bytes)
-                    temp_pptx.flush()
-                    slides = convert_from_bytes(open(temp_pptx.name, "rb").read(), dpi=150)
-                    for i, img in enumerate(slides):
-                        st.image(img, caption=f"Slide {i+1}", use_column_width=True)
-            except Exception as e:
-                st.warning(f"⚠️ Preview error: {e}")
+        title = input_text.split("\n")[0][:40]
+        save_slide(username, title, slide_filename)
 
-            st.download_button("⬇️ Download Slide", result.pptx_bytes, file_name=os.path.basename(filename))
+        st.success("✅ Slide generated and saved!")
+        st.download_button("⬇️ Download Slide", result.pptx_bytes, file_name=os.path.basename(slide_filename))
 
+# ===============================
+# 📚 PAGE 2: MY SLIDES
+# ===============================
 elif menu == "My Slides":
-    st.subheader("📁 Your Slides")
+    st.header("📚 My Slides")
+
     slides = get_user_slides(username)
     if not slides:
-        st.info("No slides yet.")
-    else:
-        for title, date_created, path in slides:
-            st.markdown(f"### 📄 {title}")
-            st.caption(f"_Created on {date_created}_")
-    
-            try:
-                with open(path, "rb") as f:
-                    pptx_data = f.read()
-    
-                # Convert the first slide to image for preview
-                import tempfile
-                from pdf2image import convert_from_bytes
-                import comtypes.client  # Only works if LibreOffice is installed locally
-    
-                # Save .pptx to a temp file
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pptx") as tmp_pptx:
-                    tmp_pptx.write(pptx_data)
-                    tmp_pptx.flush()
-    
-                    # 👇️ optional fallback: extract text instead of converting to image
-                    from pptx import Presentation
-                    prs = Presentation(tmp_pptx.name)
-                    for i, slide in enumerate(prs.slides):
-                        text = "\n".join(
-                            shape.text.strip() for shape in slide.shapes if hasattr(shape, "text") and shape.text.strip()
-                        )
-                        st.markdown(f"**Slide {i+1} Content:**\n{text}")
-                        if i == 0: break  # Just show the first slide's content as preview
-    
-            except Exception as e:
-                st.warning(f"⚠️ Could not preview slide: {e}")
-    
+        st.info("No saved slides yet.")
+        st.stop()
+
+    for title, date_created, path in slides:
+        st.markdown(f"### 📄 {title}")
+        st.caption(f"Created on {date_created}")
+
+        try:
+            with open(path, "rb") as f:
+                pptx_data = f.read()
+
+            # Save to a temp file and extract text
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".pptx") as tmp:
+                tmp.write(pptx_data)
+                tmp.flush()
+
+                prs = Presentation(tmp.name)
+                for i, slide in enumerate(prs.slides):
+                    st.markdown(f"**Slide {i+1} Content Preview:**")
+                    slide_text = ""
+                    for shape in slide.shapes:
+                        if hasattr(shape, "text") and shape.text.strip():
+                            slide_text += shape.text.strip() + "\n"
+                    if slide_text:
+                        st.text(slide_text.strip())
+                    else:
+                        st.caption("_No text found on this slide._")
+                    break  # Only show first slide preview
+
+            with open(path, "rb") as f:
+                st.download_button("⬇️ Download Slide", f, file_name=os.path.basename(path))
+
+        except Exception as e:
+            st.warning(f"⚠️ Could not preview slide: {e}")
