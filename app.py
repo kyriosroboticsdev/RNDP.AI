@@ -95,18 +95,31 @@ elif menu == "My Slides":
         for title, date_created, path in slides:
             st.markdown(f"### 📄 {title}")
             st.caption(f"_Created on {date_created}_")
-
+    
             try:
                 with open(path, "rb") as f:
                     pptx_data = f.read()
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pptx") as temp_pptx:
-                    temp_pptx.write(pptx_data)
-                    temp_pptx.flush()
-                    images = convert_from_bytes(open(temp_pptx.name, "rb").read(), dpi=150)
-                    for i, img in enumerate(images):
-                        st.image(img, caption=f"Slide {i+1}", use_column_width=True)
+    
+                # Convert the first slide to image for preview
+                import tempfile
+                from pdf2image import convert_from_bytes
+                import comtypes.client  # Only works if LibreOffice is installed locally
+    
+                # Save .pptx to a temp file
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pptx") as tmp_pptx:
+                    tmp_pptx.write(pptx_data)
+                    tmp_pptx.flush()
+    
+                    # 👇️ optional fallback: extract text instead of converting to image
+                    from pptx import Presentation
+                    prs = Presentation(tmp_pptx.name)
+                    for i, slide in enumerate(prs.slides):
+                        text = "\n".join(
+                            shape.text.strip() for shape in slide.shapes if hasattr(shape, "text") and shape.text.strip()
+                        )
+                        st.markdown(f"**Slide {i+1} Content:**\n{text}")
+                        if i == 0: break  # Just show the first slide's content as preview
+    
             except Exception as e:
-                st.warning(f"⚠️ Could not preview: {e}")
-
-            with open(path, "rb") as f:
-                st.download_button("⬇️ Download", f, file_name=os.path.basename(path))
+                st.warning(f"⚠️ Could not preview slide: {e}")
+    
