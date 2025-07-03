@@ -4,7 +4,6 @@ python-pptx
 pydantic
 pymupdf
 pdf2image
-poppler
 Pillow
 google-auth
 google-auth-oauthlib
