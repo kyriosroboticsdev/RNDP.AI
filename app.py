@@ -13,12 +13,11 @@ from helpers import (
 )
 from db import initialize_db, save_slide, get_user_slides, add_user
 from google_auth import login_user, logout_user
-from pptx import Presentation
 
 # App setup
-st.set_page_config(page_title="Robotics Slide Generator", layout="centered")
+st.set_page_config(page_title="RNDP.AI", layout="centered")
 
-# Database setup
+# Initialize DB
 initialize_db()
 
 # Session timeout config
@@ -26,7 +25,7 @@ SESSION_TIMEOUT = 30 * 60
 if "login_time" in st.session_state:
     if time.time() - st.session_state["login_time"] > SESSION_TIMEOUT:
         st.session_state.clear()
-        st.warning("⏰ Session expired. Please log in again.")
+        st.warning("Session expired. Please log in again.")
         st.stop()
 
 # Authenticate user
@@ -38,41 +37,38 @@ if not user_info:
 username = user_info["email"].split("@")[0].lower()
 add_user(username, user_info["name"], user_info["email"])
 
-# Sidebar user info + logout
-st.sidebar.markdown(f"👋 Logged in as: `{user_info['email']}`")
+# Sidebar logout
+st.sidebar.markdown(f"Logged in as: `{user_info['email']}`")
 logout_user()
 
-# Main navigation
-st.title("🤖 Robotics Slide Generator")
-menu = st.selectbox("Choose a page:", ["Generate Slide", "My Slides"])
+# Navigation
+st.title("RNDP.AI")
+menu = st.selectbox("Select a page", ["Generate Slide", "My Slides"])
 
-# Define output data model
+# Output model
 class SlideOutput(BaseModel):
     pptx_bytes: bytes
 
-# ===============================
-# 🔧 PAGE 1: GENERATE SLIDE
-# ===============================
+# Page: Generate Slide
 if menu == "Generate Slide":
-    st.header("📄 Generate a New Slide")
+    st.subheader("Generate a New Slide")
 
-    input_text = st.text_area("📝 Slide Topic", help="Write a brief prompt or description")
-    template_file = st.file_uploader("📂 Upload Template (.pptx)", type=["pptx"])
-    image_file = st.file_uploader("🖼️ Optional image for slide", type=["png", "jpg", "jpeg"])
+    input_text = st.text_area("Slide Topic", help="Enter a brief notebook entry or description")
+    template_file = st.file_uploader("Upload Template (.pptx)", type=["pptx"])
+    image_file = st.file_uploader("Upload Image (optional)", type=["png", "jpg", "jpeg"])
 
-    # Font and image customization
     fallback_images = os.listdir("images") if os.path.exists("images") else []
     fallback_image_choice = None
     if not image_file and fallback_images:
         ai_choice = get_ai_recommended_image(input_text, fallback_images)
-        fallback_image_choice = st.selectbox("📎 Choose fallback image", fallback_images, index=fallback_images.index(ai_choice))
+        fallback_image_choice = st.selectbox("Select fallback image", fallback_images, index=fallback_images.index(ai_choice))
 
-    font_name = st.selectbox("🖋 Font Style", ["Calibri", "Arial", "Times New Roman", "Verdana"])
-    font_color = st.color_picker("🎨 Font Color", "#000000")[1:]
+    font_name = st.selectbox("Font Style", ["Calibri", "Arial", "Times New Roman", "Verdana"])
+    font_color = st.color_picker("Font Color", "#000000")[1:]
 
-    if st.button("🚀 Generate Slide"):
+    if st.button("Generate Slide"):
         if not input_text or not template_file:
-            st.warning("Please provide both a prompt and a template.")
+            st.warning("Both a topic and a template are required.")
             st.stop()
 
         result = structured_generator(
@@ -95,48 +91,19 @@ if menu == "Generate Slide":
         title = input_text.split("\n")[0][:40]
         save_slide(username, title, slide_filename)
 
-        st.success("✅ Slide generated and saved!")
-        st.download_button("⬇️ Download Slide", result.pptx_bytes, file_name=os.path.basename(slide_filename))
+        st.success("Slide successfully generated and saved.")
+        st.download_button("Download Slide", result.pptx_bytes, file_name=os.path.basename(slide_filename))
 
-# ===============================
-# 📚 PAGE 2: MY SLIDES
-# ===============================
+# Page: My Slides
 elif menu == "My Slides":
-    st.header("📚 My Slides")
+    st.subheader("My Saved Slides")
 
     slides = get_user_slides(username)
     if not slides:
-        st.info("No saved slides yet.")
+        st.info("No saved slides found.")
         st.stop()
 
     for title, date_created, path in slides:
-        st.markdown(f"### 📄 {title}")
-        st.caption(f"Created on {date_created}")
-
-        try:
-            with open(path, "rb") as f:
-                pptx_data = f.read()
-
-            # Save to a temp file and extract text
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".pptx") as tmp:
-                tmp.write(pptx_data)
-                tmp.flush()
-
-                prs = Presentation(tmp.name)
-                for i, slide in enumerate(prs.slides):
-                    st.markdown(f"**Slide {i+1} Content Preview:**")
-                    slide_text = ""
-                    for shape in slide.shapes:
-                        if hasattr(shape, "text") and shape.text.strip():
-                            slide_text += shape.text.strip() + "\n"
-                    if slide_text:
-                        st.text(slide_text.strip())
-                    else:
-                        st.caption("_No text found on this slide._")
-                    break  # Only show first slide preview
-
-            with open(path, "rb") as f:
-                st.download_button("⬇️ Download Slide", f, file_name=os.path.basename(path))
-
-        except Exception as e:
-            st.warning(f"⚠️ Could not preview slide: {e}")
+        st.markdown(f"**{title}**  \n_Created on {date_created}_")
+        with open(path, "rb") as f:
+            st.download_button("Download", f, file_name=os.path.basename(path))
