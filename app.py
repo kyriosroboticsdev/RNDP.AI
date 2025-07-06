@@ -4,7 +4,7 @@ import streamlit as st
 import os
 import time
 import uuid
-import tempfile
+import re
 from pydantic import BaseModel
 from helpers import (
     structured_generator,
@@ -13,14 +13,13 @@ from helpers import (
 )
 from db import initialize_db, save_slide, get_user_slides, add_user
 from google_auth import login_user, logout_user
+from openai import AzureOpenAI
 
-# App setup
+# --- Streamlit Config ---
 st.set_page_config(page_title="RNDP.AI", layout="centered")
-
-# Initialize DB
 initialize_db()
 
-# Session timeout config
+# --- Session Timeout ---
 SESSION_TIMEOUT = 30 * 60
 if "login_time" in st.session_state:
     if time.time() - st.session_state["login_time"] > SESSION_TIMEOUT:
@@ -28,32 +27,70 @@ if "login_time" in st.session_state:
         st.warning("Session expired. Please log in again.")
         st.stop()
 
-# Authenticate user
+# --- Login Flow ---
 user_info = login_user()
 if not user_info:
     st.stop()
 
-# Register user if not in DB
 username = user_info["email"].split("@")[0].lower()
 add_user(username, user_info["name"], user_info["email"])
 
-# Sidebar logout
+# --- Sidebar Info ---
 st.sidebar.markdown(f"Logged in as: `{user_info['email']}`")
 logout_user()
 
-# Navigation
+# --- Page Navigation ---
 st.title("RNDP.AI")
 menu = st.selectbox("Select a page", ["Generate Slide", "My Slides"])
 
-# Output model
+
+# ----------------------------
+# SMARTCHECK VALIDATION
+# ----------------------------
+def validate_description(input_text: str, topic: str) -> tuple[bool, str]:
+    sentences = re.split(r'[.!?]+', input_text.strip())
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
+    if len(sentences) < 3:
+        return False, "Please enter at least 3 complete and meaningful sentences."
+
+    try:
+        client = AzureOpenAI(
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            api_version="2024-02-15-preview",
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        )
+        deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+
+        response = client.chat.completions.create(
+            model=deployment,
+            messages=[
+                {"role": "system", "content": "You check if a description matches a topic."},
+                {"role": "user", "content": f"Topic: {topic}\nDescription: {input_text}\n\nIs this relevant and on-topic? Respond YES or NO."}
+            ],
+            temperature=0,
+            max_tokens=5
+        )
+
+        decision = response.choices[0].message.content.strip().lower()
+        if "yes" not in decision:
+            return False, "Your description doesn't seem to match the topic. Please revise it."
+
+        return True, "Valid input."
+
+    except Exception as e:
+        return False, f"AI relevance check failed: {e}"
+
+
+# ----------------------------
+# Slide Generation Page
+# ----------------------------
 class SlideOutput(BaseModel):
     pptx_bytes: bytes
 
-# Page: Generate Slide
 if menu == "Generate Slide":
     st.subheader("Generate a New Slide")
 
-    input_text = st.text_area("Slide Topic", help="Enter a brief notebook entry or description")
+    input_text = st.text_area("Slide Topic", help="Write your notebook entry or observation here.")
     template_file = st.file_uploader("Upload Template (.pptx)", type=["pptx"])
     image_file = st.file_uploader("Upload Image (optional)", type=["png", "jpg", "jpeg"])
 
@@ -68,7 +105,12 @@ if menu == "Generate Slide":
 
     if st.button("Generate Slide"):
         if not input_text or not template_file:
-            st.warning("Both a topic and a template are required.")
+            st.warning("Please fill out all required fields.")
+            st.stop()
+
+        valid, msg = validate_description(input_text, input_text)
+        if not valid:
+            st.warning(msg)
             st.stop()
 
         result = structured_generator(
@@ -84,26 +126,29 @@ if menu == "Generate Slide":
         )
 
         os.makedirs("slides", exist_ok=True)
-        slide_filename = f"slides/{username}_page{uuid.uuid4().hex[:4]}.pptx"
-        with open(slide_filename, "wb") as f:
+        filename = f"slides/{username}_page{uuid.uuid4().hex[:4]}.pptx"
+        with open(filename, "wb") as f:
             f.write(result.pptx_bytes)
 
         title = input_text.split("\n")[0][:40]
-        save_slide(username, title, slide_filename)
+        save_slide(username, title, filename)
 
         st.success("Slide successfully generated and saved.")
-        st.download_button("Download Slide", result.pptx_bytes, file_name=os.path.basename(slide_filename))
+        st.download_button("Download Slide", result.pptx_bytes, file_name=os.path.basename(filename))
 
-# Page: My Slides
+
+# ----------------------------
+# My Slides Page
+# ----------------------------
 elif menu == "My Slides":
     st.subheader("My Saved Slides")
 
     slides = get_user_slides(username)
     if not slides:
-        st.info("No saved slides found.")
+        st.info("No slides saved yet.")
         st.stop()
 
     for title, date_created, path in slides:
-        st.markdown(f"**{title}**  \n_Created on {date_created}_")
+        st.markdown(f"**{title}**\n_Created on {date_created}_")
         with open(path, "rb") as f:
             st.download_button("Download", f, file_name=os.path.basename(path))
