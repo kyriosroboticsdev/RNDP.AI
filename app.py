@@ -83,7 +83,7 @@ if menu == "Generate Slide":
     st.subheader("Generate a New Slide")
 
     # Inputs
-    title_text = st.text_input("Slide Title", placeholder="Example: Claw Testing Begins")
+    title_text = st.text_input("Slide Title", placeholder="Example: Drivetrain Testing Begins")
     input_text = st.text_area("Slide Description", help="Write your notebook entry here.")
 
     template_file = st.file_uploader("Upload Template (.pptx)", type=["pptx"])
@@ -96,7 +96,16 @@ if menu == "Generate Slide":
         ai_suggestion = get_ai_recommended_image(input_text, fallback_images)
         fallback_image_choice = st.selectbox("Select fallback image", fallback_images, index=fallback_images.index(ai_suggestion))
 
-    font_name = st.selectbox("Font Style", ["Calibri", "Arial", "Times New Roman", "Verdana"])
+    font_name = st.selectbox("Font Style", ["Calibri", "Arial", "Times New Roman", "Verdana", "Helvetica", "Arial", "Futura", "Univers", "Gill Sans", "Avenir", "Proxima Nova", "Open Sans", "Roboto", "Lato",
+"Montserrat", "Raleway", "Source Sans Pro", "Nunito", "PT Sans", "Ubuntu", "Poppins", "Noto Sans", "Cabin", "Work Sans",
+"Times New Roman", "Georgia", "Garamond", "Baskerville", "Palatino", "Black Ops One", "Merriweather", "Libre Baskerville", "Playfair Display", "Lora",
+"PT Serif", "Crimson Text", "Spectral", "EB Garamond", "Cormorant", "Old Standard TT", "Tinos", "Arvo", "Zilla Slab", "Domine",
+"Brush Script", "Pacifico", "Dancing Script", "Great Vibes", "Satisfy", "Sacramento", "Lobster", "Amatic SC", "Indie Flower", "Kaushan Script",
+"Alex Brush", "Allura", "Yellowtail", "Caveat", "Gloria Hallelujah", "Courgette", "Patrick Hand", "Shadows Into Light", "Cookie", "Marck Script",
+"Courier New", "Consolas", "Monaco", "Inconsolata", "Fira Code", "Source Code Pro", "JetBrains Mono", "Anonymous Pro", "Ubuntu Mono", "IBM Plex Mono",
+"Bebas Neue", "Bangers", "Anton", "Oswald", "Black Ops One", "Alfa Slab One", "Abril Fatface", "Impact", "Fredericka the Great", "Righteous",
+"Exo 2", "Cinzel", "Orbitron", "Russo One", "Unica One", "Luckiest Guy", "Audiowide", "Monoton", "Major Mono Display", "Press Start 2P",
+"Quicksand", "Josefin Sans", "Asap", "DM Sans", "Varela Round", "Manrope", "Space Grotesk", "Sora", "Mulish", "Inter"])
     font_color = st.color_picker("Font Color", "#000000")[1:]
 
     # Submission
