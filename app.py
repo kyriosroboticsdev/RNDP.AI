@@ -15,11 +15,11 @@ from db import initialize_db, save_slide, get_user_slides, add_user
 from google_auth import login_user, logout_user
 from openai import AzureOpenAI
 
-# App setup
+# Configuration
 st.set_page_config(page_title="RNDP.AI", layout="centered")
 initialize_db()
 
-# Session timeout config
+# Session Timeout
 SESSION_TIMEOUT = 30 * 60
 if "login_time" in st.session_state:
     if time.time() - st.session_state["login_time"] > SESSION_TIMEOUT:
@@ -27,7 +27,7 @@ if "login_time" in st.session_state:
         st.warning("Session expired. Please log in again.")
         st.stop()
 
-# Authenticate user
+# Login
 user_info = login_user()
 if not user_info:
     st.stop()
@@ -35,15 +35,15 @@ if not user_info:
 username = user_info["email"].split("@")[0].lower()
 add_user(username, user_info["name"], user_info["email"])
 
-# Sidebar Logout
+# Sidebar
 st.sidebar.markdown(f"Logged in as: `{user_info['email']}`")
 logout_user()
 
-# App Title
+# Title
 st.title("RNDP.AI")
-menu = st.selectbox("Select a page", ["Generate Slide", "My Slides"])
+menu = st.selectbox("Choose a page", ["Generate Slide", "My Slides"])
 
-# SmartCheck: Validate 3+ sentences and relevance
+# Validator: At least 3 relevant sentences
 def validate_description(input_text: str, topic: str) -> tuple[bool, str]:
     sentences = re.split(r'[.!?]+', input_text.strip())
     sentences = [s.strip() for s in sentences if len(s.strip()) > 10]
@@ -57,6 +57,7 @@ def validate_description(input_text: str, topic: str) -> tuple[bool, str]:
             azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
         )
         deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+
         response = client.chat.completions.create(
             model=deployment,
             messages=[
@@ -66,43 +67,46 @@ def validate_description(input_text: str, topic: str) -> tuple[bool, str]:
             temperature=0,
             max_tokens=5
         )
-        if "yes" not in response.choices[0].message.content.strip().lower():
-            return False, "Your description doesn't seem to match the topic. Please revise it."
-        return True, "Valid input."
+        answer = response.choices[0].message.content.strip().lower()
+        if "yes" not in answer:
+            return False, "The description may not be relevant to the title. Please revise it."
+        return True, "Description validated."
     except Exception as e:
-        return False, f"AI relevance check failed: {e}"
+        return False, f"Validation error: {e}"
 
-# Output model for slide
+# Output data model
 class SlideOutput(BaseModel):
     pptx_bytes: bytes
 
-# Page: Generate Slide
+# Generate Slide Page
 if menu == "Generate Slide":
     st.subheader("Generate a New Slide")
 
+    # Inputs
     title_text = st.text_input("Slide Title", placeholder="Example: Claw Testing Begins")
     input_text = st.text_area("Slide Description", help="Write your notebook entry here.")
 
     template_file = st.file_uploader("Upload Template (.pptx)", type=["pptx"])
     image_file = st.file_uploader("Upload Image (optional)", type=["png", "jpg", "jpeg"])
 
+    # Conditional fallback image logic
     fallback_images = os.listdir("images") if os.path.exists("images") else []
     fallback_image_choice = None
-
     if not image_file and fallback_images:
-        ai_choice = get_ai_recommended_image(input_text, fallback_images)
-        fallback_image_choice = st.selectbox("Select fallback image", fallback_images, index=fallback_images.index(ai_choice))
+        ai_suggestion = get_ai_recommended_image(input_text, fallback_images)
+        fallback_image_choice = st.selectbox("Select fallback image", fallback_images, index=fallback_images.index(ai_suggestion))
 
     font_name = st.selectbox("Font Style", ["Calibri", "Arial", "Times New Roman", "Verdana"])
     font_color = st.color_picker("Font Color", "#000000")[1:]
 
+    # Submission
     if st.button("Generate Slide"):
         if not input_text or not title_text or not template_file:
             st.warning("Please fill out the title, description, and upload a template.")
             st.stop()
 
-        valid, msg = validate_description(input_text, title_text)
-        if not valid:
+        is_valid, msg = validate_description(input_text, title_text)
+        if not is_valid:
             st.warning(msg)
             st.stop()
 
@@ -116,9 +120,10 @@ if menu == "Generate Slide":
             font_name=font_name,
             font_color=font_color,
             fallback_image_filename=fallback_image_choice,
-            custom_title=title_text
+            custom_title=title_text  # Critical: this ensures title is injected
         )
 
+        # Save
         os.makedirs("slides", exist_ok=True)
         filename = f"slides/{username}_page{uuid.uuid4().hex[:4]}.pptx"
         with open(filename, "wb") as f:
@@ -128,16 +133,16 @@ if menu == "Generate Slide":
         st.success("Slide successfully generated and saved.")
         st.download_button("Download Slide", result.pptx_bytes, file_name=os.path.basename(filename))
 
-# Page: My Slides
+# My Slides Page
 elif menu == "My Slides":
     st.subheader("My Saved Slides")
 
     slides = get_user_slides(username)
     if not slides:
-        st.info("No saved slides yet.")
+        st.info("No slides saved yet.")
         st.stop()
 
     for title, date_created, path in slides:
-        st.markdown(f"**{title}**\n_Created on {date_created}_")
+        st.markdown(f"**{title}** — _{date_created}_")
         with open(path, "rb") as f:
             st.download_button("Download", f, file_name=os.path.basename(path))
